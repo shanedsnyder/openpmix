@@ -1455,38 +1455,32 @@ pmix_regattr_input_t dictionary[] = {
      .description = (char *[]){"return comma-delimited list of identifiers for all",
                                "available storage systems", NULL}},
 
-    {.name = "PMIX_STORAGE_CAPACITY_LIMIT", .string = "pmix.strg.cap", .type = PMIX_UINT64,
+    {.name = "PMIX_STORAGE_CAPACITY_LIMIT", .string = "pmix.strg.caplim", .type = PMIX_UINT64,
      .description = (char *[]){"return overall capacity (in Megabytes[base2]) of",
                                "specified storage system", NULL}},
 
-    {.name = "PMIX_STORAGE_CAPACITY_FREE", .string = "pmix.strg.free", .type = PMIX_UINT64,
-     .description = (char *[]){"return free capacity (in Megabytes[base2]) of",
+    {.name = "PMIX_STORAGE_CAPACITY_USED", .string = "pmix.strg.capuse", .type = PMIX_UINT64,
+     .description = (char *[]){"return used capacity (in Megabytes[base2]) of",
                                "specified storage system", NULL}},
 
-    {.name = "PMIX_STORAGE_CAPACITY_AVAIL", .string = "pmix.strg.avail", .type = PMIX_UINT64,
-     .description = (char *[]){"return capacity (in Megabytes[[base2]]) of specified",
-                               "storage system that is available for use by the",
-                               "calling program", NULL}},
-
-    {.name = "PMIX_STORAGE_OBJECT_LIMIT", .string = "pmix.strg.obj", .type = PMIX_UINT64,
+    {.name = "PMIX_STORAGE_OBJECT_LIMIT", .string = "pmix.strg.objlim", .type = PMIX_UINT64,
      .description = (char *[]){"return overall limit on number of objects (e.g.,",
                                "inodes) of specified storage system", NULL}},
 
-    {.name = "PMIX_STORAGE_OBJECTS_FREE", .string = "pmix.strg.objf", .type = PMIX_UINT64,
-     .description = (char *[]){"return number of free objects (e.g., inodes) of",
+    {.name = "PMIX_STORAGE_OBJECTS_USED", .string = "pmix.strg.objuse", .type = PMIX_UINT64,
+     .description = (char *[]){"return number of used objects (e.g., inodes) of",
                                "specified storage system", NULL}},
 
-    {.name = "PMIX_STORAGE_OBJECTS_AVAIL", .string = "pmix.strg.obja", .type = PMIX_UINT64,
-     .description = (char *[]){"return number of objects (e.g., inodes) of specified",
-                               "storage system that are available for use by the",
-                               "calling program", NULL}},
+    {.name = "PMIX_STORAGE_XFER_SIZE", .string = "pmix.strg.xfersz", .type = PMIX_UINT64,
+     .description = (char *[]){"return optimal transfer size (in Kilobytes[base2]) of",
+                               "specified storage system", NULL}},
+
+    {.name = "PMIX_STORAGE_BW_LIMIT", .string = "pmix.strg.bwlim", .type = PMIX_FLOAT,
+     .description = (char *[]){"return overall bandwidth limit (in Megabytes[base2]/sec) of",
+                               "specified storage system", NULL}},
 
     {.name = "PMIX_STORAGE_BW", .string = "pmix.strg.bw", .type = PMIX_FLOAT,
-     .description = (char *[]){"return overall bandwidth (in Megabytes[base2]/sec) of",
-                               "specified storage system", NULL}},
-
-    {.name = "PMIX_STORAGE_AVAIL_BW", .string = "pmix.strg.availbw", .type = PMIX_FLOAT,
-     .description = (char *[]){"return overall bandwidth (in Megabytes[base2]/sec) of",
+     .description = (char *[]){"return overall observed bandwidth (in Megabytes[base2]/sec) of",
                                "specified storage system that is available for use by",
                                "the calling program", NULL}},
 
@@ -1500,6 +1494,12 @@ pmix_regattr_input_t dictionary[] = {
      .description = (char *[]){"Qualifier indicating the type of storage being",
                                "referenced by a query (e.g., lustre, gpfs, online,",
                                "fabric-attached, ...)", NULL}},
+
+    {.name = "PMIX_STORAGE_HOST", .string = "pmix.strg.host", .type = PMIX_STRING,
+     .description = (char *[]){"identifier of a particular storage system host", NULL}},
+
+    {.name = "PMIX_STORAGE_DEVICE", .string = "pmix.strg.dev", .type = PMIX_STRING,
+     .description = (char *[]){"identifier of a particular storage system device", NULL}},
 
     {.name = "PMIX_FABRIC_COST_MATRIX", .string = "pmix.fab.cm", .type = PMIX_POINTER,
      .description = (char *[]){"Pointer to a two-dimensional array of point-to-point",

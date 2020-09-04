@@ -45,6 +45,8 @@
 #include "src/mca/pstrg/base/base.h"
 #include "pstrg_lustre.h"
 
+#include <lustre/lustreapi.h>
+
 static pmix_status_t lustre_init(void);
 static void lustre_finalize(void);
 static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
@@ -86,28 +88,19 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                            pmix_list_t *results,
                            pmix_pstrg_query_cbfunc_t cbfunc, void *cbdata)
 {
-    size_t n, m, k;
+    size_t n, m, k, i, j;
     char **sid, **mountpt;
     bool takeus;
     uid_t uid = UINT32_MAX;
     gid_t gid = UINT32_MAX;
+    lustre_storage_t *q_sys;
+    char *q_str;
+    pmix_status_t q_ret;
 
     pmix_output_verbose(2, pmix_pstrg_base_framework.framework_output,
                         "pstrg: lustre query");
 
-    /* just put something here so that Travis will pass its tests
-     * because it treats warnings as errors, and wants to warn about
-     * unused variables */
-    sid = pmix_argv_split("foo,bar", ',');
-    pmix_argv_free(sid);
-    sid = NULL;
-    mountpt = pmix_argv_split("foo,bar", ',');
-    pmix_argv_free(mountpt);
-    mountpt = NULL;
-
-    /* now on to the real code */
-
-
+#if 0
     for (n=0; n < nqueries; n++) {
         /* did they specify a storage type for this query? */
         takeus = true;
@@ -117,7 +110,7 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                 /* NOTE: I only included "lustre" as an accepted type, but we might
                  * want to consider other types as well - e.g., "parallel", "persistent",...) */
 
-                if (NULL == strcasestr("lustre", queries[n].qualifiers[k].value.data.string)) {
+                if (NULL == strcasestr(queries[n].qualifiers[k].value.data.string, "lustre")) {
                     /* they are not interested in us */
                     takeus = false;;
                 }
@@ -128,21 +121,8 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
             continue;
         }
 
-        /* see if they want the list of storage systems - this doesn't take any
-         * qualifiers */
         for (m=0; NULL != queries[n].keys[m]; m++) {
-            if (0 == strcmp(queries[n].keys[m], PMIX_QUERY_STORAGE_LIST)) {
-                /* ADD HERE:
-                 *
-                 * Obtain a list of all available Lustre storage systems. The IDs
-                 * we return should be those that we want the user to provide when
-                 * asking about a specific Lustre system. Please get the corresponding
-                 * mount pts for each identifier so I can track them for further queries.
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
-            }
+            printf("%s:\n", queries[n].keys[m]);
 
             /* the remaining query keys all accept the storage ID and/or path qualifiers */
             sid = NULL;
@@ -163,93 +143,121 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                 }
             }
 
-            if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_LIMIT)) {
-                /* ADD HERE:
+            /* XXX: if no sid/mntpnt for queries below, do we return info on every storage system we know about? */
+
+            for (i = 0, j = 0;;) {
+                if (sid && sid[i] != NULL) {
+                    /* storage id based query */
+                    k  = 0;
+                    while (availsys[k].name != NULL) {
+                        if (strcmp(availsys[k].name, sid[i]) == 0) {
+                            q_sys = &availsys[k];
+                            q_str = availsys[k].name;
+                            break;
+                        }
+                        k++;
+                    }
+                    i++;
+                }
+                else if (mountpt && mountpt[j] != NULL) {
+                    /* mount point based query */
+                    k = 0;
+                    while (availsys[k].name != NULL) {
+                        if (strcmp(availsys[k].mountpt, mountpt[j]) == 0) {
+                            q_sys = &availsys[k];
+                            q_str = availsys[k].mountpt;
+                            break;
+                        }
+                        k++;
+                    }
+                    j++;
+                }
+                else {
+                    /* no more storage systems to query */
+                    break;
+                }
+            }
+
+            if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_ID)) {
+                /* don't worry about this one for now - once I see how to get the
+                 * storage list and mount pts, I will construct the response here
                  *
-                 * Get the capacity of the Lustre storage systems. If they ask for
-                 * a specific one(s), then get just those.
+                 * NOTE to self: could me a comma-delimited set of storage IDs, so
+                 * return the mount pt for each of them
                  */
+                char *strg_id = q_sys->name;
+                printf("\t%s: %s\n", q_str, strg_id);
 
                 /* I will package the data for return once I see what Lustre provides */
                 continue;
-
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_FREE)) {
-                /* ADD HERE:
+            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_PATH)) {
+                /* don't worry about this one for now - once I see how to get the
+                 * storage list and mount pts, I will construct the response here
                  *
-                 * Get the amount of free capacity of the Lustre storage systems. If they ask for
-                 * a specific one, then get just that one.
+                 * NOTE to self: could me a comma-delimited set of paths, so
+                 * return the ID for each of them
                  */
+                char *mountpt = q_sys->mountpt;
+                printf("\t%s: %s\n", q_str, mountpt);
 
                 /* I will package the data for return once I see what Lustre provides */
                 continue;
-
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_AVAIL)) {
-                /* ADD HERE:
-                 *
-                 * Get the capacity of the Lustre storage systems that are available to the
-                 * caller's userid/grpid, as provided in the qualifiers.
+            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_LIMIT)) {
+                /* if given a uid/gid, answer this query using Lustre-specific code;
+                 * otherwise, fallthrough to base VFS query code
                  */
-                if (UINT32_MAX == uid || UINT32_MAX == gid) {
-                    /* they failed to provide the user's info - I will
-                     * take care of returning an appropriate error */
+                if (UINT32_MAX != uid || UINT32_MAX != gid) {
+                    /* ADD HERE:
+                     *
+                     * Get the total capacity of the Lustre storage system for the given
+                     * uid and gid. If they ask for a specific one(s), then get just those.
+                     */
+                    printf("\t%s: NOT SUPPORTED!\n", q_str);
 
+                    /*
+                     * Let me know if you need further info to process the request - e.g.,
+                     * we could provide the app's jobid or argv[0]. If they ask for
+                     * a specific storage system, then get process that one.
+                     */
+
+                    /* I will package the data for return once I see what Lustre provides */
+                    continue;
                 }
 
-                /*
-                 * Let me know if you need further info to process the request - e.g.,
-                 * we could provide the app's jobid or argv[0]. If they ask for
-                 * a specific storage system, then get process that one.
+            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_USED)) {
+                /* if given a uid/gid, answer this query using Lustre-specific code;
+                 * otherwise, fallthrough to base VFS query code
                  */
+                if (UINT32_MAX != uid || UINT32_MAX != gid) {
+                    /* ADD HERE:
+                     *
+                     * Get the used capacity of the Lustre storage system for the given
+                     * uid and gid. If they ask for a specific one(s), then get just those.
+                     */
+                    printf("\t%s: NOT SUPPORTED!\n", q_str);
 
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
+                    /*
+                     * Let me know if you need further info to process the request - e.g.,
+                     * we could provide the app's jobid or argv[0]. If they ask for
+                     * a specific storage system, then get process that one.
+                     */
 
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_OBJECT_LIMIT)) {
-                /* ADD HERE:
-                 *
-                 * Get the limit on number of objects in the Lustre storage systems. If they ask for
-                 * a specific one(s), then get just those.
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
-
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_OBJECTS_FREE)) {
-                /* ADD HERE:
-                 *
-                 * Get the number of free objects in the Lustre storage systems. If they ask for
-                 * a specific one(s), then get just those.
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
-
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_AVAIL)) {
-                /* ADD HERE:
-                 *
-                 * Get the number of objects in the Lustre storage systems that are available to the
-                 * caller's userid/grpid, as provided in the qualifiers.
-                 */
-                if (UINT32_MAX == uid || UINT32_MAX == gid) {
-                    /* they failed to provide the user's info - I will
-                     * take care of returning an appropriate error */
-
+                    /* I will package the data for return once I see what Lustre provides */
+                    continue;
                 }
-
-                /*
-                 * Let me know if you need further info to process the request - e.g.,
-                 * we could provide the app's jobid or argv[0]. If they ask for
-                 * a specific storage system, then get process that one.
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
 
             } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_BW)) {
                 /* ADD HERE:
                  *
                  * Get the overall bandwidth of the Lustre storage systems. If they ask for
                  * a specific one, then get just that one.
+                 */
+                printf("\t%s: NOT SUPPORTED!\n", q_str);
+
+                /*
+                 * Let me know if you need further info to process the request - e.g.,
+                 * we could provide the app's jobid or argv[0]. If they ask for
+                 * a specific storage system, then get process that one.
                  */
 
                 /* I will package the data for return once I see what Lustre provides */
@@ -261,42 +269,25 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                  * Get the bandwidth of the Lustre storage systems that is available to the
                  * caller's userid/grpid.
                  */
-                if (UINT32_MAX == uid || UINT32_MAX == gid) {
-                    /* they failed to provide the user's info - I will
-                     * take care of returning an appropriate error */
-
-                }
+                printf("\t%s: NOT SUPPORTED!\n", q_str);
 
                 /*
-                If you need further info, please let me know - e.g.,
+                 * Let me know if you need further info to process the request - e.g.,
                  * we could provide the app's jobid or argv[0]. If they ask for
-                 * a specific storage system, then get just that one.
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_ID)) {
-                /* don't worry about this one for now - once I see how to get the
-                 * storage list and mount pts, I will construct the response here
-                 *
-                 * NOTE to self: could me a comma-delimited set of storage IDs, so
-                 * return the mount pt for each of them
-                 */
-
-                /* I will package the data for return once I see what Lustre provides */
-                continue;
-            } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_PATH)) {
-                /* don't worry about this one for now - once I see how to get the
-                 * storage list and mount pts, I will construct the response here
-                 *
-                 * NOTE to self: could me a comma-delimited set of paths, so
-                 * return the ID for each of them
+                 * a specific storage system, then get process that one.
                  */
 
                 /* I will package the data for return once I see what Lustre provides */
                 continue;
             }
+
+            /* as fallback, call into base code to run general VFS query */
+            printf("\t%s: ", q_str);
+            q_ret = pmix_pstrg_base_vfs_query(q_sys->mountpt, queries[n].keys[m],
+                results);
         }
     }
-    return PMIX_ERR_NOT_FOUND;
+#endif
+
+    return PMIX_ERR_NOT_SUPPORTED;
 }
