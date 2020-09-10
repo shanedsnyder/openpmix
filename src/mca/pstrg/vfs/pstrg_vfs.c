@@ -123,7 +123,7 @@ static pmix_status_t vfs_init(void)
                 break;
             }
 
-            /* create a unique string ID for the file system. 
+            /* create a unique string ID for the file system.
              * currently the ID is just '<mnt_type>-<fs_mount_dir>'
              */
             tracker->fs_info.id = malloc(strlen(ent.mnt_type) + strlen(ent.mnt_dir) + 2);
@@ -172,7 +172,7 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                            pmix_list_t *results,
                            pmix_pstrg_query_cbfunc_t cbfunc, void *cbdata)
 {
-    size_t n, m, k, i;
+    size_t n, m, k, i, p;
     char **sid, **mount; //XXX free?
     char *tmp_id, *tmp_mount;
     bool takeus;
@@ -180,6 +180,13 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
     struct statvfs stat_buf;
     int ret;
     pmix_status_t rc = PMIX_SUCCESS;
+    pmix_infolist_t *iptr;
+    pmix_info_t *infoptr;
+    pmix_kval_t *kv;
+    char **tmpres = NULL;
+    char *tmpstring;
+    pmix_list_t kyresults;
+    pmix_data_array_t *darray;
 
     pmix_output_verbose(2, pmix_pstrg_base_framework.framework_output,
                         "pstrg: vfs query");
@@ -189,17 +196,29 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
         sid = NULL;
         mount = NULL;
 
+        PMIX_CONSTRUCT(&kyresults, pmix_list_t);
+
         for (k=0; k < queries[n].nqual; k++) {
             if (0 == strcmp(queries[n].qualifiers[k].key, PMIX_STORAGE_ID)) {
                 /* we can answer generic queries for storage ids */
                 /* there may be more than one (comma-delimited) storage id, so
                  * split them into a NULL-terminated argv-type array */
+                if (NULL != sid) {
+                    /* cannot have more than one ID qualifier for a key */
+                    PMIX_LIST_DESTRUCT(&kyresults);
+                    return PMIX_ERR_BAD_PARAM;
+                }
                 sid = pmix_argv_split(queries[n].qualifiers[k].value.data.string, ',');
             }
             else if (0 == strcmp(queries[n].qualifiers[k].key, PMIX_STORAGE_PATH)) {
                 /* we can answer generic queries for storage paths */
                 /* there may be more than one (comma-delimited) mount pt, so
                  * split them into a NULL-terminated argv-type array */
+                if (NULL != mount) {
+                    /* cannot have more than one path qualifier for a key */
+                    PMIX_LIST_DESTRUCT(&kyresults);
+                    return PMIX_ERR_BAD_PARAM;
+                }
                 mount = pmix_argv_split(queries[n].qualifiers[k].value.data.string, ',');
             }
             else {
@@ -211,6 +230,7 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
         if (!takeus) {
             //XXX do we set an error? add an error to the response? just leave it blank?
             rc = PMIX_ERR_NOT_SUPPORTED;
+            PMIX_LIST_DESTRUCT(&kyresults);
             continue;
         }
 
@@ -223,12 +243,24 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
             printf("%s:\n", queries[n].keys[m]);
 
             if (0 == strcmp(queries[n].keys[m], PMIX_QUERY_STORAGE_LIST)) {
-                printf("\t%s: ", pmix_pstrg_vfs_module.name); 
+                // RHC: where do you check for the qualifiers?
+                printf("\t%s: ", pmix_pstrg_vfs_module.name);
                 if (queries[n].nqual == 0) {
                     PMIX_LIST_FOREACH(tracker, &registered_fs_list, pmix_pstrg_vfs_tracker_t) {
                         printf("%s,", tracker->fs_info.id);
+                        pmix_argv_append_nosize(&tmpres, tracker->fs_info.id);
                     }
                     printf("\n");
+                    if (0 < pmix_argv_count(tmpres)) {
+                        /* construct the result */
+                        iptr = PMIX_NEW(pmix_infolist_t);
+                        tmpstring = pmix_argv_join(tmpres, ',');
+                        pmix_argv_free(tmpres);
+                        PMIX_INFO_LOAD(&iptr->info, PMIX_QUERY_STORAGE_LIST, tmpstring, PMIX_STRING);
+                        free(tmpstring);
+                        /* add it to the results */
+                        pmix_list_append(&kyresults, &iptr->super);
+                    }
                 }
                 else {
                     /* no qualifiers supported for querying the storage list currently */
@@ -236,17 +268,31 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                 }
                 continue;
             }
+            // RHC: I guess you are asking for the storage ID's corresponding to
+            // one or more mount paths? Perhaps some explanation of what you are
+            // trying to query would help here as I'm confused
             else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_ID)) {
-                if (mount && !sid) {
+                if (NULL != mount && NULL == sid) {
                     for (i = 0; mount[i] != NULL; i++) {
                         printf("\t%s: ", mount[i]);
                         tmp_id = pmix_pstrg_get_registered_fs_id_by_mount(mount[i]);
                         if (tmp_id) {
                             printf("%s\n", tmp_id);
+                            pmix_argv_append_nosize(&tmpres, mount[i]);
                         }
                         else {
                             printf("ERR_NOT_FOUND\n");
                         }
+                    }
+                    if (0 < pmix_argv_count(tmpres)) {
+                        /* construct the result */
+                        iptr = PMIX_NEW(pmix_infolist_t);
+                        tmpstring = pmix_argv_join(tmpres, ',');
+                        pmix_argv_free(tmpres);
+                        PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_ID, tmpstring, PMIX_STRING);
+                        free(tmpstring);
+                        /* add it to the results */
+                        pmix_list_append(&kyresults, &iptr->super);
                     }
                 }
                 else {
@@ -254,16 +300,30 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                 }
             }
             else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_PATH)) {
-                if (sid && !mount) {
+                if (NULL != sid && NULL == mount) {
                     for (i = 0; sid[i] != NULL; i++) {
                         printf("\t%s: ", sid[i]);
+                        // RHC: does this find more than one value? The attribute definition
+                        // implies "no", that it only is supposed to return one, but the loop
+                        // seems to aggregate all the values, so that is what I supported
                         tmp_mount = pmix_pstrg_get_registered_fs_mount_by_id(sid[i]);
                         if (tmp_mount) {
                             printf("%s\n", tmp_mount);
+                            pmix_argv_append_nosize(&tmpres, tmp_mount);
                         }
                         else {
                             printf("ERR_NOT_FOUND\n");
                         }
+                    }
+                    if (0 < pmix_argv_count(tmpres)) {
+                        /* construct the result */
+                        iptr = PMIX_NEW(pmix_infolist_t);
+                        tmpstring = pmix_argv_join(tmpres, ',');
+                        pmix_argv_free(tmpres);
+                        PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_PATH, tmpstring, PMIX_STRING);
+                        free(tmpstring);
+                        /* add it to the results */
+                        pmix_list_append(&kyresults, &iptr->super);
                     }
                 }
                 else {
@@ -308,21 +368,46 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                         if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_LIMIT)) {
                             uint64_t cap_limit = (stat_buf.f_blocks * stat_buf.f_frsize) /
                                 (1024 * 1024);
-                            printf("\t%s: %lu MB\n", marker, cap_limit);
+                            printf("\t%s: %"PRIu64" MB\n", marker, cap_limit);
+                            /* construct the result */
+                            iptr = PMIX_NEW(pmix_infolist_t);
+                            PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_CAPACITY_LIMIT, &cap_limit, PMIX_UINT64);
+                            /* add it to the results */
+                            pmix_list_append(&kyresults, &iptr->super);
                         } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_CAPACITY_USED)) {
                             uint64_t cap_used =
                                 ((stat_buf.f_blocks - stat_buf.f_bavail) * stat_buf.f_frsize) /
                                 (1024 * 1024);
-                            printf("\t%s: %lu MB\n", marker, cap_used);
+                            printf("\t%s: %"PRIu64" MB\n", marker, cap_used);
+                            /* construct the result */
+                            iptr = PMIX_NEW(pmix_infolist_t);
+                            PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_CAPACITY_USED, &cap_used, PMIX_UINT64);
+                            /* add it to the results */
+                            pmix_list_append(&kyresults, &iptr->super);
                         } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_OBJECT_LIMIT)) {
                             uint64_t obj_limit = stat_buf.f_files;
-                            printf("\t%s: %lu\n", marker, obj_limit);
+                            printf("\t%s: %"PRIu64"\n", marker, obj_limit);
+                            /* construct the result */
+                            iptr = PMIX_NEW(pmix_infolist_t);
+                            PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_OBJECT_LIMIT, &obj_limit, PMIX_UINT64);
+                            /* add it to the results */
+                            pmix_list_append(&kyresults, &iptr->super);
                         } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_OBJECTS_USED)) {
                             uint64_t obj_used = stat_buf.f_files - stat_buf.f_favail;
-                            printf("\t%s: %lu\n", marker, obj_used);
+                            printf("\t%s: %"PRIu64"\n", marker, obj_used);
+                            /* construct the result */
+                            iptr = PMIX_NEW(pmix_infolist_t);
+                            PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_OBJECTS_USED, &obj_used, PMIX_UINT64);
+                            /* add it to the results */
+                            pmix_list_append(&kyresults, &iptr->super);
                         } else if (0 == strcmp(queries[n].keys[m], PMIX_STORAGE_XFER_SIZE)) {
                             uint64_t xfer_size = stat_buf.f_bsize / 1024;
-                            printf("\t%s: %lu KB\n", marker, xfer_size);
+                            printf("\t%s: %"PRIu64" KB\n", marker, xfer_size);
+                            /* construct the result */
+                            iptr = PMIX_NEW(pmix_infolist_t);
+                            PMIX_INFO_LOAD(&iptr->info, PMIX_STORAGE_XFER_SIZE, &xfer_size, PMIX_UINT64);
+                            /* add it to the results */
+                            pmix_list_append(&kyresults, &iptr->super);
                         } else {
                             printf("\t%s: ERR_NOT_SUPPORTED\n", marker);
                         }
@@ -331,8 +416,22 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
                 else {
                     printf("\tERR_INVALID_ARGS\n");
                 }
-
             }
+        }
+        if (0 < (p = pmix_list_get_size(&kyresults))) {
+            kv = PMIX_NEW(pmix_kval_t);
+            kv->key = strdup(PMIX_QUERY_RESULTS);
+            PMIX_VALUE_CREATE(kv->value, 1);
+            kv->value->type = PMIX_DATA_ARRAY;
+            PMIX_DATA_ARRAY_CREATE(darray, p, PMIX_INFO);
+            kv->value->data.darray = darray;
+            infoptr = (pmix_info_t*)darray->array;
+            p = 0;
+            PMIX_LIST_FOREACH(iptr, &kyresults, pmix_infolist_t) {
+                PMIX_INFO_XFER(&infoptr[p], &iptr->info);
+                ++p;
+            }
+            pmix_list_append(results, &kv->super);
         }
     }
 
