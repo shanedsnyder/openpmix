@@ -433,6 +433,7 @@ static pmix_status_t query(pmix_query_t queries[], size_t nqueries,
             }
             pmix_list_append(results, &kv->super);
         }
+        PMIX_LIST_DESTRUCT(&kyresults);
     }
 
     return rc;
